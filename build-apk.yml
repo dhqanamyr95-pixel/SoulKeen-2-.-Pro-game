@@ -1,0 +1,56 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  export-android:
+    name: Export APK
+    runs-on: ubuntu-22.04
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack starter.zip if present
+        run: |
+          if [ -f starter.zip ]; then
+            command -v unzip >/dev/null 2>&1 || (apt-get update && apt-get install -y unzip)
+            unzip -o -q starter.zip
+          fi
+
+      - name: Setup Godot and Android
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mkdir -v -p ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable || true
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android -keystore ~/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -validity 9999 -deststoretype pkcs12
+          SDK="${ANDROID_HOME:-/usr/lib/android-sdk}"
+          JDK="${JAVA_HOME:-$(dirname $(dirname $(readlink -f $(which javac))))}"
+          cat > ~/.config/godot/editor_settings-4.tres <<EOT
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "${SDK}"
+          export/android/java_sdk_path = "${JDK}"
+          export/android/debug_keystore = "$HOME/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOT
+
+      - name: Import project
+        run: godot --headless --verbose --import || true
+
+      - name: Export debug APK
+        run: |
+          mkdir -p build
+          godot --headless --verbose --export-debug "Android" build/yearzero-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: yearzero-debug-apk
+          path: build/*.apk
